@@ -5,45 +5,51 @@
 ## 1. 整体架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Tauri 2.0 桌面应用                       │
-├───────────────────────────┬─────────────────────────────────────┤
-│        前端（React）       │        Rust 后端（Tauri Core）       │
-│                           │                                     │
-│  ┌───────────────────┐   │   ┌─────────────────────────────┐   │
-│  │   UI 层            │   │   │   Tauri Commands             │   │
-│  │   - 主窗口 (表格)    │   │   │   - get_portfolios          │   │
-│  │   - 规则配置面板     │   │   │   - add/remove_portfolio    │   │
-│  │   - 设置面板        │   │   │   - get/add/update_rule     │   │
-│  │   - 系统托盘        │   │   │   - send_notification       │   │
-│  └───────────────────┘   │   │   - export/import_config     │   │
-│  ┌───────────────────┐   │   │   - get/update_settings      │   │
-│  │   业务逻辑层        │   │   └─────────────────────────────┘   │
-│  │   - 轮询调度器      │   │   ┌─────────────────────────────┐   │
-│  │   - 规则匹配引擎    │   │   │   Tauri 插件                 │   │
-│  │   - 数据格式化      │   │   │   - tauri-plugin-store       │   │
-│  └───────────────────┘   │   │   - tauri-plugin-notification │   │
-│  ┌───────────────────┐   │   └─────────────────────────────┘   │
-│  │   数据层            │   │                                     │
-│  │   - stock-sdk      │   │                                     │
-│  │   - zustand store  │   │                                     │
-│  └───────────────────┘   │                                     │
-├───────────────────────────┴─────────────────────────────────────┤
-│                     外部数据源（仅前端可达）                       │
-│  ┌─────────────────┐  ┌─────────────────┐                      │
-│  │  腾讯行情 API     │  │  东方财富 API    │                      │
-│  └─────────────────┘  └─────────────────┘                      │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                    投资监控浏览器扩展（Manifest V3）                    │
+├─────────────────────────────┬────────────────────────────────────────┤
+│        Popup（React）        │         Service Worker（TS）           │
+│                              │                                        │
+│  ┌───────────────────────┐   │   ┌────────────────────────────────┐   │
+│  │   UI 层                │   │   │   chrome.alarms 调度器          │   │
+│  │   - Popup 持仓表格      │   │   │   - 交易时间判断                │   │
+│  │   - 添加标的弹窗        │   │   │   - stock-sdk 行情轮询          │   │
+│  │   - 规则配置面板        │   │   │   - 规则匹配引擎                │   │
+│  │   - 设置面板           │   │   │   - Web Notification 触发       │   │
+│  └───────────────────────┘   │   └────────────────────────────────┘   │
+│  ┌───────────────────────┐   │                                        │
+│  │   业务逻辑层           │   │                                        │
+│  │   - 数据格式化         │   │                                        │
+│  │   - 表单校验          │   │                                        │
+│  └───────────────────────┘   │                                        │
+│  ┌───────────────────────┐   │                                        │
+│  │   数据层              │   │                                        │
+│  │   - wxt/storage 读取   │   │                                        │
+│  │   - stock-sdk 搜索     │   │                                        │
+│  └───────────────────────┘   │                                        │
+├──────────────────────────────┴────────────────────────────────────────┤
+│                         wxt/storage.local                              │
+│              （持仓、规则、设置、行情缓存、触发状态）                     │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                     外部数据源（Service Worker 直连）                   │
+│  ┌─────────────────┐  ┌─────────────────┐                            │
+│  │  腾讯行情 API     │  │  东方财富 API    │                            │
+│  └─────────────────┘  └─────────────────┘                            │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 核心设计决策
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
-| 市场数据获取 | 前端 stock-sdk 直连 | stock-sdk 是纯 JS 库，无法在 Rust 中运行；前端直连无需 IPC 开销 |
-| 数据持久化 | Rust 端 tauri-plugin-store | 官方插件，KV 存储，跨平台一致 |
-| 系统通知 | Rust 端 Tauri 原生通知 | 比 node-notifier 更可靠，权限管理更简单 |
-| 规则匹配 | 前端逻辑 | 匹配对象是前端内存中的行情数据，无需走 IPC |
+| 扩展开发框架 | WXT | 文件系统生成 manifest、HMR、多浏览器支持、内置 storage |
+| 市场数据获取 | Service Worker 中 stock-sdk 直连 | SDK 是纯 JS，可在 SW 运行；声明 host_permissions 后绕过 CORS |
+| 数据持久化 | `wxt/storage` | WXT 封装 `chrome.storage.local`，带类型、默认值、迁移 |
+| 通知 | Service Worker + Web Notification | Manifest V3 标准方案，popup 关闭后仍能触发 |
+| 规则匹配 | Service Worker 中执行 | 行情在后台获取，匹配也在后台完成，减少 popup 负担 |
+| UI 样式 | 原生 CSS + Minimal Dark | 轻量、可控、符合"无干扰"定位 |
 
 ---
 
@@ -51,85 +57,111 @@
 
 | 层次 | 技术 | 版本 | 说明 |
 |------|------|------|------|
-| 桌面框架 | Tauri | 2.x | 轻量、跨平台、Rust 后端 |
-| 前端框架 | React | 18+ | 生态成熟 |
+| 扩展框架 | WXT | latest | 基于 Vite 的浏览器扩展开发框架 |
+| 前端框架 | React | 19+ | 生态成熟 |
 | 类型系统 | TypeScript | 5.x | 类型安全 |
-| 构建工具 | Vite | 6.x | 快速 HMR |
+| 构建工具 | Vite | WXT 内置 | 由 WXT 管理具体版本 |
 | 包管理器 | pnpm | 9.x | 磁盘占用小、速度快 |
-| UI 组件库 | Ant Design | 5.x | 表格、表单、通知组件齐全 |
-| 状态管理 | Zustand | 5.x | 轻量、无 boilerplate |
 | 行情数据 | stock-sdk | latest | 零依赖、纯 JS、支持批量查询 |
-| 本地存储 | tauri-plugin-store | latest | Tauri 官方 KV 插件 |
+| 本地存储 | wxt/storage | WXT 内置 | 封装 `chrome.storage.local` |
 | 配置导出 | js-yaml | latest | YAML 解析/序列化 |
+| Linter | oxlint | latest | Rust 编写，替代 ESLint |
+| Formatter | oxfmt | latest | Rust 编写，替代 Prettier |
+| 图标 | lucide-react | latest | 细线风格图标，契合 Minimal Dark |
 
 ---
 
 ## 3. 分层架构
 
-### 3.1 前端分层
+### 3.1 目录结构（WXT 约定）
 
 ```
 src/
-├── components/          # UI 组件（纯展示 + 交互）
-│   ├── Portfolio/       # 持仓相关组件
-│   │   ├── AddStockModal.tsx      # 添加标的弹窗
-│   │   ├── PortfolioTable.tsx     # 持仓列表表格
-│   │   └── ExportImportBar.tsx    # 导入导出操作栏
-│   ├── Rules/           # 规则相关组件
-│   │   ├── RuleForm.tsx           # 规则配置表单
-│   │   └── RuleList.tsx           # 规则列表
-│   ├── Settings/        # 设置组件
-│   │   └── SettingsPanel.tsx      # 设置面板
-│   └── Common/          # 通用组件
-│       ├── StatusIndicator.tsx    # 状态栏指示器
-│       └── EmptyState.tsx         # 空状态占位
-├── hooks/               # 自定义 Hooks
-│   ├── usePortfolio.ts           # 持仓 CRUD Hook
-│   ├── useRules.ts               # 规则 CRUD Hook
-│   ├── useMarketData.ts          # 行情轮询 Hook
-│   └── useNotification.ts        # 通知 Hook
-├── services/            # 数据访问层（封装 invoke + stock-sdk）
-│   ├── portfolioService.ts       # invoke 封装
-│   ├── ruleService.ts            # invoke 封装
-│   ├── marketDataService.ts      # stock-sdk 封装
-│   └── notificationService.ts    # invoke 封装
-├── stores/              # Zustand 状态
-│   ├── portfolioStore.ts         # 持仓状态
-│   ├── ruleStore.ts              # 规则状态
-│   ├── marketDataStore.ts        # 行情数据状态
-│   └── settingsStore.ts          # 设置状态
-├── types/               # TypeScript 类型
+├── entrypoints/              # WXT 入口点
+│   ├── popup/                # 插件弹窗主 UI
+│   │   ├── index.html
+│   │   ├── main.tsx
+│   │   └── App.tsx
+│   ├── background.ts         # Service Worker
+│   └── options/              # 可选：扩展选项页（MVP 暂不做）
+│       ├── index.html
+│       ├── main.tsx
+│       └── App.tsx
+├── components/               # React 组件
+│   ├── Portfolio/
+│   │   ├── AddStockModal.tsx
+│   │   ├── PortfolioTable.tsx
+│   │   └── ExportImportBar.tsx
+│   ├── Rules/
+│   │   ├── RuleForm.tsx
+│   │   └── RuleList.tsx
+│   ├── Settings/
+│   │   └── SettingsPanel.tsx
+│   └── Common/
+│       ├── StatusIndicator.tsx
+│       ├── EmptyState.tsx
+│       ├── Button.tsx
+│       ├── Input.tsx
+│       ├── Card.tsx
+│       └── Switch.tsx
+├── hooks/                    # 自定义 Hooks
+│   ├── usePortfolio.ts
+│   ├── useRules.ts
+│   ├── useMarketData.ts
+│   └── useSettings.ts
+├── services/                 # 数据访问层
+│   ├── marketDataService.ts  # stock-sdk 封装
+│   ├── portfolioService.ts   # storage 封装
+│   ├── ruleService.ts        # storage 封装
+│   └── settingsService.ts    # storage 封装
+├── storage/                  # wxt/storage 封装
+│   ├── portfolioStorage.ts
+│   ├── ruleStorage.ts
+│   ├── settingsStorage.ts
+│   └── marketDataStorage.ts
+├── stores/                   # Zustand 状态（popup 内使用）
+│   ├── portfolioStore.ts
+│   ├── ruleStore.ts
+│   ├── marketDataStore.ts
+│   └── settingsStore.ts
+├── styles/                   # 全局样式 + 设计 tokens
+│   ├── tokens.css            # CSS 变量
+│   ├── global.css            # 全局样式
+│   └── components/           # 组件样式模块
+├── types/                    # TypeScript 类型
 │   ├── portfolio.ts
 │   ├── rule.ts
-│   └── marketData.ts
-└── utils/               # 工具函数
-    ├── tradingTime.ts            # 交易时间判断
-    └── ruleMatcher.ts            # 规则匹配逻辑
+│   ├── marketData.ts
+│   └── settings.ts
+└── utils/                    # 工具函数
+    ├── tradingTime.ts
+    ├── ruleMatcher.ts
+    └── formatters.ts
 ```
 
 ### 3.2 数据流
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    数据流架构                                  │
-│                                                             │
-│  stock-sdk ──HTTP──▶ marketDataService ──▶ marketDataStore  │
-│                                                          │     │
-│  Tauri Command ──IPC──▶ portfolioService ──▶ portfolioStore│  │
-│                                                          │     │
-│  Tauri Command ──IPC──▶ ruleService ──▶ ruleStore        │  │
-│                                                          │     │
-│  marketDataStore + ruleStore ──▶ ruleMatcher ──▶ notificationService
-│                                                               │
-│  UI ◀── zustand stores ──▶ React 组件                        │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                           数据流架构                                  │
+│                                                                      │
+│  stock-sdk ──HTTP──▶ marketDataService ──▶ marketDataStorage        │
+│                                                                      │
+│  Popup ──storage API──▶ portfolioService ──▶ portfolioStorage       │
+│                                                                      │
+│  Popup ──storage API──▶ ruleService ──▶ ruleStorage                 │
+│                                                                      │
+│  marketDataStorage + ruleStorage ──▶ ruleMatcher ──▶ Notification   │
+│                                                                      │
+│  Popup ◀── zustand stores + storage API ──▶ React 组件              │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 **关键数据流说明：**
 
-1. **行情轮询流**：`useMarketData` Hook 启动定时器 → 调用 `marketDataService` → 更新 `marketDataStore` → UI 自动重渲染
-2. **规则匹配流**：`marketDataStore` 更新时触发 `ruleMatcher` → 逐条匹配 `ruleStore` 中的活跃规则 → 命中则调用 `notificationService` → 调用 `invoke('send_notification')`
-3. **CRUD 流**：用户操作 UI → 调用 `portfolioService/ruleService` → `invoke()` IPC → Rust 端写 `tauri-plugin-store` → 返回结果 → 更新 Zustand store
+1. **行情轮询流**：Service Worker 启动 `chrome.alarms` → alarm 触发时读取 storage 中的持仓和设置 → 调用 `marketDataService` → 写入 `marketDataStorage`。
+2. **规则匹配流**：行情更新后，Service Worker 读取 `ruleStorage` 中的规则 → `ruleMatcher` 逐条匹配 → 命中则调用 `self.registration.showNotification(...)`。
+3. **UI 数据流**：Popup 打开时从 storage 读取持仓/规则/行情缓存 → 更新 Zustand store → 渲染组件。用户操作后写回 storage。
 
 ---
 
@@ -139,28 +171,27 @@ src/
 
 **职责**：标的 CRUD、导入导出
 
-**Tauri Commands（Rust 端）：**
+**Storage API：**
 
-| Command | 参数 | 返回值 | 说明 |
-|---------|------|--------|------|
-| `get_portfolios` | 无 | `Portfolio[]` | 从 tauri-plugin-store 读取 |
-| `add_portfolio` | `{ code, name, market }` | `Portfolio` | 写入 store，自动生成 id 和时间戳 |
-| `remove_portfolio` | `{ id }` | `void` | 删除持仓及其关联规则 |
-| `export_config` | 无 | `string`（YAML） | 读取持仓 + 规则，序列化为 YAML |
-| `import_config` | `{ yaml }` | `void` | 解析 YAML，覆盖写入 store |
+| 方法 | 参数 | 返回值 | 说明 |
+|------|------|--------|------|
+| `portfolioStorage.getAll()` | 无 | `Portfolio[]` | 从 storage 读取 |
+| `portfolioStorage.add(item)` | `Partial<Portfolio>` | `Portfolio` | 写入 storage，自动生成 id 和时间戳 |
+| `portfolioStorage.remove(id)` | `string` | `void` | 删除持仓及其关联规则 |
+| `portfolioStorage.import(data)` | `Portfolio[]` | `void` | 覆盖写入 |
 
 **前端 service 封装：**
 
 ```typescript
 // services/portfolioService.ts
-import { invoke } from '@tauri-apps/api/core';
+import { portfolioStorage } from '@/storage/portfolioStorage';
 
 export async function getPortfolios(): Promise<Portfolio[]> {
-  return invoke<Portfolio[]>('get_portfolios');
+  return portfolioStorage.getAll();
 }
 
 export async function addPortfolio(code: string, name: string, market: string): Promise<Portfolio> {
-  return invoke<Portfolio>('add_portfolio', { code, name, market });
+  return portfolioStorage.add({ code, name, market });
 }
 ```
 
@@ -168,7 +199,7 @@ export async function addPortfolio(code: string, name: string, market: string): 
 
 **职责**：行情轮询、数据格式化
 
-> 此模块纯前端实现，不涉及 Tauri IPC。
+> 此模块在 Service Worker 中运行，不涉及 Popup。
 
 ```typescript
 // services/marketDataService.ts
@@ -176,7 +207,6 @@ import { StockSDK } from 'stock-sdk';
 
 const sdk = new StockSDK();
 
-// A 股 / ETF 实时行情（含 PE、PB；ETF 的 pe/pb 通常为空）
 export async function fetchStockQuotes(codes: string[]): Promise<StockQuote[]> {
   const results = await sdk.quotes.cn(codes);
   return results.map(item => ({
@@ -189,19 +219,6 @@ export async function fetchStockQuotes(codes: string[]): Promise<StockQuote[]> {
   }));
 }
 
-// 基金净值（仅作参考，不用于主界面实时价/涨跌幅）
-export async function fetchFundQuotes(codes: string[]): Promise<FundQuote[]> {
-  const results = await sdk.quotes.fund(codes);
-  return results.map(item => ({
-    code: item.code,
-    name: item.name,
-    nav: item.nav,        // 单位净值
-    accNav: item.accNav,   // 累计净值
-    change: item.change,   // 净值日变动（非实时涨跌幅）
-  }));
-}
-
-// 个股股息率：取最近一条分红记录的 dividendYield
 export async function getDividendYield(code: string): Promise<number | null> {
   const details = await sdk.reference.dividendDetail(code);
   if (!details || details.length === 0) return null;
@@ -213,7 +230,7 @@ export async function getDividendYield(code: string): Promise<number | null> {
 
 **职责**：规则匹配、触发策略
 
-**核心逻辑（前端）：**
+**核心逻辑（Service Worker）：**
 
 ```typescript
 // utils/ruleMatcher.ts
@@ -249,15 +266,15 @@ function compare(current: number, operator: string, threshold: number): boolean 
 }
 ```
 
-**触发策略：**
+**触发策略（Service Worker 内存状态）：**
 
 ```typescript
-// hooks/useMarketData.ts 中的触发逻辑
+// entrypoints/background.ts 中的触发逻辑
 
 // 运行时内存状态：记录每条规则上一次的匹配结果，不持久化
 const lastMatchedStates: Record<string, boolean> = {};
 
-function evaluateRules(rules: Rule[], marketData: MarketDataMap) {
+async function evaluateRules(rules: Rule[], marketData: MarketDataMap) {
   for (const rule of rules) {
     if (!rule.isActive) continue;
 
@@ -266,13 +283,11 @@ function evaluateRules(rules: Rule[], marketData: MarketDataMap) {
 
     const prevMatched = lastMatchedStates[rule.id] ?? false;
 
-    // 条件从 false → true，触发通知并记录触发时间
     if (result.matched && !prevMatched) {
-      sendNotification(rule, result.currentValue);
-      updateRule(rule.id, { lastTriggeredAt: new Date().toISOString() });
+      showNotification(rule, result.currentValue);
+      await ruleStorage.update(rule.id, { lastTriggeredAt: new Date().toISOString() });
     }
 
-    // 更新内存中的匹配状态（用于下次判断是否复位）
     lastMatchedStates[rule.id] = result.matched;
   }
 }
@@ -280,53 +295,33 @@ function evaluateRules(rules: Rule[], marketData: MarketDataMap) {
 
 ### 4.4 通知模块
 
-**职责**：系统通知弹出
+**职责**：浏览器通知弹出
 
-**Tauri Command：**
-
-```rust
-// Rust 端
-use tauri_plugin_notification::NotificationExt;
-
-#[tauri::command]
-fn send_notification(app: tauri::AppHandle, title: String, body: String) {
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .unwrap();
-}
-```
-
-**前端调用：**
+**Service Worker 实现：**
 
 ```typescript
-// services/notificationService.ts
-export async function sendNotification(rule: Rule, currentValue: number) {
+// entrypoints/background.ts
+function showNotification(rule: Rule, currentValue: number) {
   const body = `${rule.name}\n当前值: ${currentValue}\n阈值: ${rule.condition.value}`;
-  await invoke('send_notification', { title: 'Investment Monitor', body });
+  self.registration.showNotification('Investment Monitor', {
+    body,
+    icon: '/icon/128.png',
+    badge: '/icon/32.png',
+  });
 }
 ```
 
 ### 4.5 设置模块
 
-**职责**：更新频率、通知开关、开机自启
-
-**Tauri Commands：**
-
-| Command | 参数 | 返回值 | 说明 |
-|---------|------|--------|------|
-| `get_settings` | 无 | `Settings` | 读取设置 |
-| `update_settings` | `{ settings }` | `void` | 保存设置 |
+**职责**：更新频率、通知开关
 
 **Settings 类型：**
 
 ```typescript
 interface Settings {
-  updateInterval: number;    // 轮询间隔（秒），默认 30
-  notificationEnabled: boolean;  // 是否启用通知，默认 true
-  soundEnabled: boolean;     // 是否启用声音，默认 false
+  updateInterval: number;          // 轮询间隔（秒），默认 30
+  notificationEnabled: boolean;    // 是否启用通知，默认 true
+  soundEnabled: boolean;           // 是否启用声音，默认 false
 }
 ```
 
@@ -350,15 +345,15 @@ interface MarketDataStore {
   data: Record<string, MarketData>;   // key = portfolioId
   lastUpdated: string | null;
   status: 'idle' | 'fetching' | 'error';
-  update: (portfolios: Portfolio[]) => Promise<void>;
+  fetch: () => Promise<void>;
 }
 
 // stores/ruleStore.ts
 interface RuleStore {
   rules: Rule[];
-  fetch: (portfolioId?: string) => Promise<void>;
+  fetch: () => Promise<void>;
   add: (portfolioId: string, rule: RuleInput) => Promise<void>;
-  update: (id: string, rule: RuleInput) => Promise<void>;
+  update: (id: string, rule: Partial<RuleInput>) => Promise<void>;
   remove: (id: string) => Promise<void>;
   toggle: (id: string) => Promise<void>;
 }
@@ -373,42 +368,94 @@ interface SettingsStore {
 
 ---
 
-## 6. 非功能设计
+## 6. Minimal Dark 设计系统应用
 
-### 6.1 性能
+### 6.1 设计 tokens（CSS 变量）
+
+```css
+/* styles/tokens.css */
+:root {
+  --background: #0A0A0F;
+  --background-alt: #12121A;
+  --muted: #1A1A24;
+  --foreground: #FAFAFA;
+  --muted-foreground: #71717A;
+  --accent: #F59E0B;
+  --accent-foreground: #0A0A0F;
+  --accent-muted: rgba(245, 158, 11, 0.15);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.15);
+  --card: rgba(26, 26, 36, 0.6);
+  --ring: #F59E0B;
+  --up: #EF4444;        /* 中国股市：红涨 */
+  --down: #22C55E;      /* 中国股市：绿跌 */
+}
+```
+
+### 6.2 字体
+
+```css
+/* styles/global.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+```
+
+### 6.3 组件风格
+
+- **卡片**：`background: var(--card)`、`backdrop-filter: blur(8px)`、`border: 1px solid var(--border)`、`border-radius: 12px`
+- **按钮 Primary**：`background: var(--accent)`、`color: var(--accent-foreground)`、`border-radius: 12px`
+- **按钮 Secondary**：透明背景 + `border: 1px solid var(--border-hover)`
+- **输入框**：`background: var(--muted)`、`border: 1px solid var(--border)`、`border-radius: 12px`
+- **表格行**：交替使用 `--background` 和 `--background-alt`
+- **hover**：边框变亮、按钮出现 amber glow
+
+---
+
+## 7. 非功能设计
+
+### 7.1 性能
 
 | 指标 | 目标 | 实现方式 |
 |------|------|----------|
-| 启动时间 | < 2s | Tauri 比 Electron 快 10x+ |
-| 内存占用 | < 100MB | Rust 后端轻量，前端 React 按需渲染 |
+| Popup 打开时间 | < 1s | 原生 CSS、无重型组件库、按需读取 storage |
+| Service Worker 启动时间 | < 2s | 逻辑精简、避免重型依赖 |
+| 内存占用 | < 80MB | 无 Rust 后端、无 Electron |
 | CPU 占用 | < 5%（轮询时） | 轮询间隔 30s，非交易时间不轮询 |
-| 数据延迟 | < 3s | stock-sdk 批量查询，单次请求覆盖所有持仓（实际受网络影响） |
+| 数据延迟 | < 3s | stock-sdk 批量查询 |
 
-### 6.2 可靠性
+### 7.2 可靠性
 
 | 场景 | 策略 |
 |------|------|
 | stock-sdk 请求失败 | 重试 3 次，间隔 1s/2s/4s |
-| 网络断开 | 状态栏提示，有网后自动恢复 |
-| 存储文件损坏 | 降级为空数据，不影响运行 |
+| 网络断开 | badge 变红提示，有网后自动恢复 |
+| storage 数据损坏 | 降级为空数据，不影响扩展运行 |
 | 规则误触发 | 单次触发策略，不会反复打扰 |
+| Service Worker 被回收 | chrome.alarms 会在下次触发时唤醒 |
 
-### 6.3 安全
+### 7.3 安全
 
 | 要求 | 实现 |
 |------|------|
 | 数据不外传 | 所有数据本地存储，仅向行情 API 发请求 |
 | 无敏感信息 | 不存储 API Key、账户信息 |
-| 代码签名 | macOS/Windows 应用签名（发布时） |
+| 最小权限 | manifest 只申请 `storage`、`alarms`、`notifications`、`host_permissions` |
 
 ---
 
-## 7. 关键决策记录
+## 8. 关键决策记录
 
 | 决策 | 选择 | 备选方案 | 否决理由 |
 |------|------|----------|----------|
-| 前端框架 | React + Ant Design | Vue + Element Plus | React 生态更成熟，Ant Design 表格组件更强 |
+| 扩展开发框架 | WXT | 原生 Vite 8 + 手写 manifest | WXT 开发体验更好，节省工程化时间 |
+| UI 实现方式 | 原生 CSS + Minimal Dark | Ant Design / Tailwind | 原生 CSS 更轻量，Minimal Dark 符合产品气质 |
 | 状态管理 | Zustand | Redux / Jotai | Zustand 最轻量，无 boilerplate |
-| 本地存储 | tauri-plugin-store | SQLite / JSON 文件 | 官方插件，KV 够用，无需引入数据库 |
-| 行情数据 | stock-sdk 直连 | 自封装 HTTP 请求 | SDK 内置限流、重试、统一格式 |
-| 包管理器 | pnpm | npm / bun | pnpm 最稳定，磁盘占用小 |
+| 本地存储 | wxt/storage | 直接操作 chrome.storage.local | WXT 封装带类型和迁移 |
+| 行情数据 | stock-sdk 在 SW 中直连 | 在 Popup 中请求 | Popup 生命周期短，后台轮询需要 SW |
+| Linter/Formatter | oxlint + oxfmt | ESLint + Prettier | Rust 工具链更快，2026 年已成熟 |
+| 通知触发 | Service Worker + Web Notification | 前端 Notification | popup 关闭后仍能触发 |

@@ -7,9 +7,10 @@
 ### 1.1 创建项目
 
 ```bash
-# 使用 Tauri 官方脚手架（React + TypeScript 模板）
-pnpm create tauri-app investment-monitor -- --template react-ts
+# 使用 WXT 官方脚手架（React + TypeScript 模板）
+pnpm dlx wxt@latest init investment-monitor
 
+# 选择模板时选 React + TypeScript
 cd investment-monitor
 pnpm install
 ```
@@ -18,36 +19,29 @@ pnpm install
 
 ```
 investment-monitor/
-├── src-tauri/                    # Rust 后端
-│   ├── src/
-│   │   ├── commands/             # Tauri Commands
-│   │   │   ├── mod.rs
-│   │   │   ├── portfolio.rs
-│   │   │   ├── rule.rs
-│   │   │   ├── notification.rs
-│   │   │   └── settings.rs
-│   │   ├── main.rs               # 入口
-│   │   └── lib.rs                # Command 注册
-│   ├── Cargo.toml
-│   └── tauri.conf.json           # Tauri 配置
-├── src/                          # React 前端
-│   ├── components/
-│   │   ├── Portfolio/
-│   │   ├── Rules/
-│   │   ├── Settings/
-│   │   └── Common/
-│   ├── hooks/
-│   ├── services/
-│   ├── stores/
-│   ├── types/
-│   ├── utils/
-│   ├── App.tsx
-│   └── main.tsx
-├── docs/                         # 项目文档
-│   └── vibe-flow/
+├── src/
+│   ├── entrypoints/              # WXT 入口点
+│   │   ├── popup/                # 插件弹窗 UI
+│   │   │   ├── index.html
+│   │   │   ├── main.tsx
+│   │   │   └── App.tsx
+│   │   ├── background.ts         # Service Worker
+│   │   └── options/              # 可选：扩展选项页（MVP 暂不做）
+│   ├── components/               # React 组件
+│   ├── hooks/                    # 自定义 Hooks
+│   ├── services/                 # 数据访问层
+│   ├── storage/                  # wxt/storage 封装
+│   ├── stores/                   # Zustand 状态
+│   ├── styles/                   # 全局样式 + CSS tokens
+│   ├── types/                    # TypeScript 类型
+│   └── utils/                    # 工具函数
+├── public/                       # 静态资源
+├── .wxt/                         # WXT 生成的类型和配置
+├── wxt.config.ts                 # WXT 配置
 ├── package.json
 ├── tsconfig.json
-├── vite.config.ts
+├── .oxlintrc.json                # oxlint 配置
+├── .oxfmtrc.json                 # oxfmt 配置
 └── README.md
 ```
 
@@ -59,67 +53,120 @@ investment-monitor/
 
 ```json
 {
+  "name": "investment-monitor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt --check .",
+    "format:fix": "oxfmt ."
+  },
   "dependencies": {
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-notification": "^2.0.0",
-    "@tauri-apps/plugin-store": "^2.0.0",
-    "antd": "^5.20.0",
-    "zustand": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "stock-sdk": "latest",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "zustand": "^5.0.0",
+    "lucide-react": "^0.x.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
     "@types/js-yaml": "^4.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^8.57.0",
-    "eslint-plugin-react": "^7.35.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@wxt-dev/module-react": "latest",
+    "oxfmt": "latest",
+    "oxlint": "latest",
     "typescript": "^5.6.0",
-    "vite": "^6.0.0",
-    "@vitejs/plugin-react": "^4.3.0"
+    "wxt": "latest"
   }
 }
 ```
 
-### 2.2 Rust 依赖（Cargo.toml）
+> **说明**：Vite 作为 WXT 的依赖被自动引入，具体版本由 WXT 管理，无需在项目中显式安装。
 
-```toml
-[dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-notification = "2"
-tauri-plugin-store = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+### 2.2 运行时权限（wxt.config.ts）
+
+```typescript
+import { defineConfig } from 'wxt';
+
+export default defineConfig({
+  manifest: {
+    name: 'Investment Monitor',
+    description: 'A lightweight browser extension for monitoring A-share and ETF quotes with rule-based alerts.',
+    version: '0.1.0',
+    permissions: ['storage', 'alarms', 'notifications'],
+    host_permissions: [
+      '*://qt.gtimg.cn/*',
+      '*://push2.eastmoney.com/*',
+      '*://*.eastmoney.com/*',
+    ],
+    action: {
+      default_popup: 'popup.html',
+      default_icon: {
+        '16': 'icon/16.png',
+        '32': 'icon/32.png',
+        '48': 'icon/48.png',
+        '128': 'icon/128.png',
+      },
+    },
+    icons: {
+      '16': 'icon/16.png',
+      '32': 'icon/32.png',
+      '48': 'icon/48.png',
+      '128': 'icon/128.png',
+    },
+  },
+});
 ```
+
+> **host_permissions 说明**：根据 stock-sdk 实际请求的 API 域名调整。上述为常见行情 API 域名示例，需在开发中核实并补充。
 
 ---
 
 ## 3. 代码规范
 
-### 3.1 ESLint 配置
+### 3.1 oxlint 配置（.oxlintrc.json）
 
 ```json
 {
-  "extends": [
-    "eslint:recommended",
-    "plugin:@typescript-eslint/recommended",
-    "plugin:react/recommended",
-    "plugin:react-hooks/recommended"
-  ],
+  "plugins": ["import", "typescript", "react", "react-hooks", "jsx-a11y"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn",
+    "style": "off"
+  },
   "rules": {
-    "@typescript-eslint/no-unused-vars": "warn",
-    "react/react-in-jsx-scope": "off"
-  }
+    "no-console": "warn",
+    "no-unused-vars": "warn",
+    "react-hooks/exhaustive-deps": "error"
+  },
+  "env": {
+    "browser": true,
+    "es2024": true
+  },
+  "globals": {
+    "chrome": "readonly"
+  },
+  "ignorePatterns": [
+    "node_modules",
+    "dist",
+    ".wxt",
+    "*.config.ts"
+  ]
 }
 ```
 
-### 3.2 Prettier 配置
+### 3.2 oxfmt 配置（.oxfmtrc.json）
 
 ```json
 {
@@ -127,16 +174,26 @@ serde_json = "1"
   "singleQuote": true,
   "trailingComma": "all",
   "printWidth": 100,
-  "tabWidth": 2
+  "tabWidth": 2,
+  "useTabs": false,
+  "bracketSpacing": true,
+  "arrowParens": "always",
+  "endOfLine": "lf",
+  "ignore": [
+    "node_modules",
+    "dist",
+    ".wxt"
+  ]
 }
 ```
 
-### 3.3 TypeScript 配置
+### 3.3 TypeScript 配置（tsconfig.json）
 
 ```json
 {
+  "extends": "./.wxt/tsconfig.json",
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2024",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -151,24 +208,237 @@ serde_json = "1"
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"],
-  "exclude": ["node_modules", "src-tauri"]
+  "include": ["src", ".wxt/types"]
 }
 ```
 
 ---
 
-## 4. Git 规范
+## 4. WXT 配置
 
-### 4.1 分支策略（单人开发）
+### 4.1 完整 wxt.config.ts 示例
+
+```typescript
+import { defineConfig } from 'wxt';
+
+export default defineConfig({
+  srcDir: 'src',
+  extensionApi: 'chrome',
+  manifestVersion: 3,
+  modules: ['@wxt-dev/module-react'],
+  manifest: {
+    name: 'Investment Monitor',
+    description: 'A lightweight browser extension for monitoring A-share and ETF quotes with rule-based alerts.',
+    version: '0.1.0',
+    permissions: ['storage', 'alarms', 'notifications'],
+    host_permissions: [
+      '*://qt.gtimg.cn/*',
+      '*://push2.eastmoney.com/*',
+      '*://*.eastmoney.com/*',
+    ],
+    action: {
+      default_popup: 'popup.html',
+      default_icon: {
+        '16': 'icon/16.png',
+        '32': 'icon/32.png',
+        '48': 'icon/48.png',
+        '128': 'icon/128.png',
+      },
+    },
+    icons: {
+      '16': 'icon/16.png',
+      '32': 'icon/32.png',
+      '48': 'icon/48.png',
+      '128': 'icon/128.png',
+    },
+  },
+  runner: {
+    startUrls: ['https://www.baidu.com'],
+  },
+});
+```
+
+### 4.2 关键配置说明
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| `srcDir` | `src` | 源码目录 |
+| `extensionApi` | `chrome` | 使用 Chrome 扩展 API |
+| `manifestVersion` | `3` | Manifest V3 |
+| `modules` | `['@wxt-dev/module-react']` | React 支持模块 |
+| `permissions` | `storage, alarms, notifications` | 最小必要权限 |
+| `host_permissions` | 行情 API 域名 | 允许跨域请求行情数据 |
+
+---
+
+## 5. 开发环境
+
+### 5.1 启动命令
+
+```bash
+# 安装依赖
+pnpm install
+
+# 启动开发模式（自动打开浏览器加载扩展）
+pnpm dev
+
+# 构建生产版本
+pnpm build
+
+# 打包为 zip（用于 Chrome Web Store）
+pnpm zip
+```
+
+### 5.2 调试
+
+- **Popup**：右键工具栏图标 → 点击弹出窗口 → 在弹窗内右键 → 检查
+- **Service Worker**：打开 `chrome://extensions/` → 找到扩展 → 点击「Service Worker」链接
+- **Storage**：在 Popup 或 Service Worker 的 DevTools 中查看 `chrome.storage.local`
+
+---
+
+## 6. Minimal Dark CSS 基础
+
+### 6.1 tokens.css
+
+```css
+/* src/styles/tokens.css */
+:root {
+  --background: #0A0A0F;
+  --background-alt: #12121A;
+  --muted: #1A1A24;
+  --foreground: #FAFAFA;
+  --muted-foreground: #71717A;
+  --accent: #F59E0B;
+  --accent-foreground: #0A0A0F;
+  --accent-muted: rgba(245, 158, 11, 0.15);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.15);
+  --card: rgba(26, 26, 36, 0.6);
+  --ring: #F59E0B;
+  --up: #EF4444;
+  --down: #22C55E;
+
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --transition-fast: 150ms ease-out;
+  --transition-base: 200ms ease-out;
+  --transition-slow: 300ms ease-out;
+}
+```
+
+### 6.2 global.css
+
+```css
+/* src/styles/global.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import './tokens.css';
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 380px;
+  min-height: 600px;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-hover);
+  border-radius: 3px;
+}
+```
+
+### 6.3 组件样式约定
+
+每个组件一个 `.module.css` 文件，使用 CSS 变量：
+
+```css
+/* src/components/Common/Button.module.css */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: var(--radius-lg);
+  font-weight: 500;
+  transition: all var(--transition-base);
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
+}
+
+.secondary {
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--border-hover);
+}
+
+.secondary:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+```
+
+---
+
+## 7. Git 规范
+
+### 7.1 分支策略（单人开发）
 
 | 分支 | 用途 | 命名 |
 |------|------|------|
 | `main` | 稳定版本 | — |
-| `feat/*` | 功能开发 | `feat/portfolio-add` |
+| `feat/*` | 功能开发 | `feat/popup-ui` |
 | `fix/*` | Bug 修复 | `fix/rule-trigger` |
 
-### 4.2 Commit 规范
+### 7.2 Commit 规范
 
 ```
 <type>(<scope>): <description>
@@ -182,157 +452,44 @@ serde_json = "1"
 - chore:    工程化
 
 示例：
-feat(portfolio): 添加股票搜索功能
-fix(rule): 修复规则重复触发问题
-refactor(store): 重构 zustand store 结构
+feat(popup): 添加股票搜索弹窗
+fix(background): 修复规则重复触发问题
+refactor(storage): 重构 wxt/storage 封装
 ```
 
 ---
 
-## 5. 开发环境
+## 8. VS Code 配置建议
 
-### 5.1 启动命令
-
-```bash
-# 安装依赖
-pnpm install
-
-# 启动开发模式（同时启动 Vite + Tauri）
-pnpm tauri dev
-
-# 构建生产版本
-pnpm tauri build
-```
-
-### 5.2 Tauri 配置（tauri.conf.json 关键配置）
+### 8.1 推荐扩展（.vscode/extensions.json）
 
 ```json
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Investment Monitor",
-  "identifier": "com.investment-monitor.app",
-  "build": {
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build",
-    "devUrl": "http://localhost:1420",
-    "frontendDist": "../dist"
-  },
-  "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Investment Monitor",
-        "width": 800,
-        "height": 600,
-        "visible": false,
-        "decorations": true,
-        "resizable": true
-      }
-    ],
-    "trayIcon": {
-      "icon": "icons/tray-icon.png",
-      "iconAsTemplate": true
-    }
-  },
-  "plugins": {
-    "notification": {},
-    "store": {}
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all"
-  }
+  "recommendations": [
+    "oxc.oxc-vscode"
+  ]
 }
 ```
 
-### 5.3 关键配置说明
+### 8.2 工作区设置（.vscode/settings.json）
 
-| 配置项 | 值 | 说明 |
-|--------|-----|------|
-| `windows[0].visible` | `false` | 主窗口默认隐藏，通过托盘图标控制显示 |
-| `trayIcon.iconAsTemplate` | `true` | macOS 暗色模式下图标自动适配 |
-| `plugins.notification` | `{}` | 启用系统通知插件 |
-| `plugins.store` | `{}` | 启用 KV 存储插件 |
-
----
-
-## 6. Vite 配置
-
-```typescript
-// vite.config.ts
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
-
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+```json
+{
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.oxlint": "explicit"
   },
-  // Tauri 需要固定端口
-  server: {
-    port: 1420,
-    strictPort: true,
-  },
-  // Tauri 在 Windows 上使用固定路径
-  clearScreen: false,
-  envPrefix: ['VITE_', 'TAURI_'],
-});
-```
-
----
-
-## 7. Zustand Store 基础模板
-
-```typescript
-// stores/createStore.ts
-import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-
-// 通用 store 创建函数，封装 invoke 调用和错误处理
-export function createCrudStore<T extends { id: string }>(
-  commandPrefix: string,
-) {
-  return create<{
-    items: T[];
-    loading: boolean;
-    error: string | null;
-    fetch: () => Promise<void>;
-    add: (item: Omit<T, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
-    remove: (id: string) => Promise<void>;
-  }>((set) => ({
-    items: [],
-    loading: false,
-    error: null,
-
-    fetch: async () => {
-      set({ loading: true, error: null });
-      try {
-        const items = await invoke<T[]>(`get_${commandPrefix}s`);
-        set({ items, loading: false });
-      } catch (e) {
-        set({ error: String(e), loading: false });
-      }
-    },
-
-    add: async (item) => {
-      const newItem = await invoke<T>(`add_${commandPrefix}`, item);
-      set((state) => ({ items: [...state.items, newItem] }));
-    },
-
-    remove: async (id) => {
-      await invoke(`remove_${commandPrefix}`, { id });
-      set((state) => ({ items: state.items.filter((i) => i.id !== id) }));
-    },
-  }));
+  "oxc.enable": true,
+  "oxc.configPath": ".oxlintrc.json"
 }
 ```
 
 ---
 
-## 8. 环境变量
+## 9. 环境变量
+
+WXT 支持通过 `.env` 文件注入环境变量，但扩展的运行时环境变量主要用于构建时配置。
 
 | 变量 | 用途 | 默认值 |
 |------|------|--------|
@@ -342,4 +499,4 @@ export function createCrudStore<T extends { id: string }>(
 | `VITE_TRADING_PM_START` | 下午交易开始时间 | `13:00` |
 | `VITE_TRADING_PM_END` | 下午交易结束时间 | `15:00` |
 
-> 环境变量仅用于开发时的可配置默认值，运行时设置通过 tauri-plugin-store 持久化。A 股交易时段逻辑在 `tradingTime.ts` 中实现。
+> 环境变量仅用于开发时的可配置默认值，运行时设置通过 `wxt/storage` 持久化。A 股交易时段逻辑在 `tradingTime.ts` 中实现。
